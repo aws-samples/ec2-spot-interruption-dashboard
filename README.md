@@ -111,47 +111,47 @@ sam deploy \
     ```
     EnvironmentSizeMap: 
         small:
-        InstanceMetadataTableRCU: 5
-        InstanceMetadataTableWCU: 10
-        FunctionTimeout: 60
-        FunctionMemorySize: 128
-        FunctionRCE: 20
-        StreamBatchSize: 10
-        StreamMaximumBatchingWindowInSeconds: 10
-        StreamMaximumRecordAgeInSeconds: 60
-        StreamMaximumRetryAttempts: 5
-        DataSinkStateMachineConcurrency: 1
+            InstanceMetadataTableRCU: 5
+            InstanceMetadataTableWCU: 10
+            FunctionTimeout: 60
+            FunctionMemorySize: 128
+            FunctionRCE: 20
+            StreamBatchSize: 10
+            StreamMaximumBatchingWindowInSeconds: 10
+            StreamMaximumRecordAgeInSeconds: 60
+            StreamMaximumRetryAttempts: 5
+            DataSinkStateMachineConcurrency: 1
         medium:
-        InstanceMetadataTableRCU: 10
-        InstanceMetadataTableWCU: 20
-        FunctionTimeout: 60
-        FunctionMemorySize: 128
-        FunctionRCE: 50
-        StreamBatchSize: 50
-        StreamMaximumBatchingWindowInSeconds: 30
-        StreamMaximumRecordAgeInSeconds: 90
-        StreamMaximumRetryAttempts: 5
-        DataSinkStateMachineConcurrency: 1
+            InstanceMetadataTableRCU: 10
+            InstanceMetadataTableWCU: 20
+            FunctionTimeout: 60
+            FunctionMemorySize: 128
+            FunctionRCE: 50
+            StreamBatchSize: 50
+            StreamMaximumBatchingWindowInSeconds: 30
+            StreamMaximumRecordAgeInSeconds: 90
+            StreamMaximumRetryAttempts: 5
+            DataSinkStateMachineConcurrency: 1
         large:
-        InstanceMetadataTableRCU: 50
-        InstanceMetadataTableWCU: 100
-        FunctionTimeout: 180
-        FunctionMemorySize: 128
-        FunctionRCE: 100
-        StreamBatchSize: 100
-        StreamMaximumBatchingWindowInSeconds: 60
-        StreamMaximumRecordAgeInSeconds: 120
-        StreamMaximumRetryAttempts: 3
-        DataSinkStateMachineConcurrency: 1
+            InstanceMetadataTableRCU: 50
+            InstanceMetadataTableWCU: 100
+            FunctionTimeout: 180
+            FunctionMemorySize: 128
+            FunctionRCE: 100
+            StreamBatchSize: 100
+            StreamMaximumBatchingWindowInSeconds: 60
+            StreamMaximumRecordAgeInSeconds: 120
+            StreamMaximumRetryAttempts: 3
+            DataSinkStateMachineConcurrency: 1
         extralarge:
-        InstanceMetadataTableRCU: 100
-        InstanceMetadataTableWCU: 200
-        FunctionTimeout: 180
-        FunctionMemorySize: 256
-        FunctionRCE: 100
-        StreamBatchSize: 200
-        StreamMaximumBatchingWindowInSeconds: 120
-        StreamMaximumRecordAgeInSeconds: 180
-        StreamMaximumRetryAttempts: 5
-        DataSinkStateMachineConcurrency: 1
+            InstanceMetadataTableRCU: 100
+            InstanceMetadataTableWCU: 200
+            FunctionTimeout: 180
+            FunctionMemorySize: 256
+            FunctionRCE: 100
+            StreamBatchSize: 200
+            StreamMaximumBatchingWindowInSeconds: 120
+            StreamMaximumRecordAgeInSeconds: 180
+            StreamMaximumRetryAttempts: 5
+            DataSinkStateMachineConcurrency: 1
     ```
