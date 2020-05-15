@@ -1,0 +1,1052 @@
+ # Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ #
+ # Permission is hereby granted, free of charge, to any person obtaining a copy of this
+ # software and associated documentation files (the "Software"), to deal in the Software
+ # without restriction, including without limitation the rights to use, copy, modify,
+ # merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
+ # permit persons to whom the Software is furnished to do so.
+ #
+ # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+ # INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+ # PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+ # HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+ # OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+ # SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Description: >
+  ec2-spot-interruption-dashboard
+
+  Sample solution for logging instance details in response to EC2 Spot Instance Interruption Warnings
+  
+Parameters:
+
+  InstanceMetadataBucketRetentionPeriodDays:
+    Description: Number of days to retain Instance Metadata In S3
+    Default: 365
+    Type: Number
+
+  InstanceMetadataTableRetentionPeriodDays:
+    Description: Number of days to retain Instance Metadata In DynamoDB
+    Default: 30
+    Type: Number    
+
+  EnvironmentSize: 
+    Type: String
+    Default: small
+    AllowedValues: 
+      - small
+      - medium
+      - large
+      - extralarge
+    Description: Environment Size - small (<1000 instances), medium (1000-5000 instances), large (5000-10000 instances), extralarge (>10000 instances)
+
+Mappings: 
+  EnvironmentSizeMap: 
+    small:
+      InstanceMetadataTableRCU: 5
+      InstanceMetadataTableWCU: 10
+      FunctionTimeout: 60
+      FunctionMemorySize: 128
+      FunctionRCE: 20
+      StreamBatchSize: 10
+      StreamMaximumBatchingWindowInSeconds: 10
+      StreamMaximumRecordAgeInSeconds: 60
+      StreamMaximumRetryAttempts: 5
+      DataSinkStateMachineConcurrency: 1
+    medium:
+      InstanceMetadataTableRCU: 10
+      InstanceMetadataTableWCU: 20
+      FunctionTimeout: 60
+      FunctionMemorySize: 128
+      FunctionRCE: 50
+      StreamBatchSize: 50
+      StreamMaximumBatchingWindowInSeconds: 30
+      StreamMaximumRecordAgeInSeconds: 90
+      StreamMaximumRetryAttempts: 5
+      DataSinkStateMachineConcurrency: 1
+    large:
+      InstanceMetadataTableRCU: 50
+      InstanceMetadataTableWCU: 100
+      FunctionTimeout: 180
+      FunctionMemorySize: 128
+      FunctionRCE: 100
+      StreamBatchSize: 100
+      StreamMaximumBatchingWindowInSeconds: 60
+      StreamMaximumRecordAgeInSeconds: 120
+      StreamMaximumRetryAttempts: 3
+      DataSinkStateMachineConcurrency: 1
+    extralarge:
+      InstanceMetadataTableRCU: 100
+      InstanceMetadataTableWCU: 200
+      FunctionTimeout: 180
+      FunctionMemorySize: 256
+      FunctionRCE: 100
+      StreamBatchSize: 200
+      StreamMaximumBatchingWindowInSeconds: 120
+      StreamMaximumRecordAgeInSeconds: 180
+      StreamMaximumRetryAttempts: 5
+      DataSinkStateMachineConcurrency: 1
+
+Resources:
+
+  # DynamoDB Table ---------------------------------------
+
+  InstanceMetadataTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: InstanceId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: InstanceId
+          KeyType: HASH     
+      ProvisionedThroughput: 
+        ReadCapacityUnits: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", InstanceMetadataTableRCU]
+        WriteCapacityUnits: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", InstanceMetadataTableWCU]      
+      StreamSpecification:
+        StreamViewType: NEW_IMAGE
+      TimeToLiveSpecification:
+        AttributeName: ExpirationTime
+        Enabled: true
+
+  # ------------------------------------------------------
+
+  # Data Sinks -------------------------------------------
+
+  InstanceMetadataDeliveryStreamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: ''
+            Effect: Allow
+            Principal:
+              Service: firehose.amazonaws.com
+            Action: 'sts:AssumeRole'
+            Condition:
+              StringEquals:
+                'sts:ExternalId': !Ref 'AWS::AccountId'
+
+  DeliveryStreamPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      Roles:
+          - !Ref InstanceMetadataDeliveryStreamRole
+      PolicyName: InstanceMetadataFirehoseDeliveryPolicy
+      PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Effect: Allow
+            Action:
+              - 's3:AbortMultipartUpload'
+              - 's3:GetBucketLocation'
+              - 's3:GetObject'
+              - 's3:ListBucket'
+              - 's3:ListBucketMultipartUploads'
+              - 's3:PutObject'
+            Resource:
+              - !GetAtt InstanceMetadataBucket.Arn
+              - !Join 
+                  - ''
+                  - - 'arn:aws:s3:::'
+                    - !Ref InstanceMetadataBucket
+                    - '*'
+
+  InstanceMetadataDeliveryStream: 
+    Type: AWS::KinesisFirehose::DeliveryStream
+    Properties: 
+      DeliveryStreamType: DirectPut
+      ExtendedS3DestinationConfiguration: 
+          BucketARN: !GetAtt InstanceMetadataBucket.Arn
+          BufferingHints: 
+              IntervalInSeconds: 60
+              SizeInMBs: 50
+          CompressionFormat: UNCOMPRESSED
+          Prefix: instances/
+          RoleARN: !GetAtt InstanceMetadataDeliveryStreamRole.Arn
+
+  InstanceMetadataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      LifecycleConfiguration:
+        Rules:
+        - Id: DeleteAfterInterval
+          Prefix: ''
+          Status: Enabled
+          ExpirationInDays: !Ref InstanceMetadataBucketRetentionPeriodDays
+
+  # ------------------------------------------------------
+
+  # Spot Interruption ------------------------------------
+
+  SpotInterruptionEventRule: 
+    Type: AWS::Events::Rule
+    Properties: 
+      Description: "EventRule"
+      EventPattern: 
+        source: 
+            - "aws.ec2"
+        detail-type: 
+            - "EC2 Spot Instance Interruption Warning"
+      State: "ENABLED"
+      Targets: 
+        - 
+          Arn: 
+            Fn::GetAtt: 
+                - "SpotInterruptionTriggerFunction"
+                - "Arn"
+          Id: "SpotInterruptionTriggerFunctionV1"
+    
+  PermissionForEventsToInvokeSpotInterruptionLambda: 
+    Type: AWS::Lambda::Permission
+    Properties: 
+      FunctionName: 
+        Ref: "SpotInterruptionTriggerFunction"
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn: 
+        Fn::GetAtt: 
+          - "SpotInterruptionEventRule"
+          - "Arn"
+
+  SpotInterruptionTriggerFunctionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: SpotInterruptionTriggerLogsPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: "*"
+        - PolicyName: SpotInterruptionTriggerDynamoDBPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "dynamodb:UpdateItem"
+                Resource: !GetAtt InstanceMetadataTable.Arn
+
+  SpotInterruptionTriggerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: source/SpotInterruptionTriggerFunction/
+      Handler: app.lambda_handler
+      Role: !GetAtt [ SpotInterruptionTriggerFunctionRole, Arn ]
+      Runtime: python3.7
+      Environment:
+        Variables:
+          INSTANCE_METADATA_TABLE: !Ref InstanceMetadataTable
+      Timeout: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionTimeout]
+      MemorySize: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionMemorySize]
+      ReservedConcurrentExecutions: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionRCE]
+  # ------------------------------------------------------
+
+  # Spot Launch ------------------------------------
+
+  SpotLaunchEventRule: 
+    Type: AWS::Events::Rule
+    Properties: 
+      Description: "EventRule"
+      EventPattern: 
+        source: 
+            - "aws.ec2"
+        detail-type: 
+            - "EC2 Spot Instance Request Fulfillment"
+      State: "ENABLED"
+      Targets: 
+        - 
+          Arn: 
+            Fn::GetAtt: 
+                - "SpotLaunchTriggerFunction"
+                - "Arn"
+          Id: "SpotLaunchTriggerFunctionV1"
+    
+  PermissionForEventsToInvokeSpotLaunchLambda: 
+    Type: AWS::Lambda::Permission
+    Properties: 
+      FunctionName: 
+        Ref: "SpotLaunchTriggerFunction"
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn: 
+        Fn::GetAtt: 
+          - "SpotLaunchEventRule"
+          - "Arn"
+
+  SpotLaunchTriggerFunctionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: SpotLaunchTriggerLogsPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: "*"
+        - PolicyName: SpotLaunchTriggerDynamoDBPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "dynamodb:UpdateItem"
+                Resource: !GetAtt InstanceMetadataTable.Arn
+
+  SpotLaunchTriggerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: source/SpotLaunchTriggerFunction/
+      Handler: app.lambda_handler
+      Role: !GetAtt [ SpotLaunchTriggerFunctionRole, Arn ]
+      Runtime: python3.7
+      Environment:
+        Variables:
+          INSTANCE_METADATA_TABLE: !Ref InstanceMetadataTable
+          INSTANCE_METADATA_ITEM_RETENTION_DAYS: !Ref InstanceMetadataTableRetentionPeriodDays
+      Timeout: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionTimeout]
+      MemorySize: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionMemorySize]
+      ReservedConcurrentExecutions: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionRCE]
+
+  # ------------------------------------------------------
+
+  # State Change Launch ----------------------------------
+
+  StateChangeEventRule: 
+    Type: AWS::Events::Rule
+    Properties: 
+      Description: "EventRule"
+      EventPattern: 
+        source: 
+            - "aws.ec2"
+        detail-type: 
+            - "EC2 Instance State-change Notification"
+        detail: 
+          state: 
+            - "running"
+            - "terminated"
+      State: "ENABLED"
+      Targets: 
+        - 
+          Arn: 
+            Fn::GetAtt: 
+                - "StateChangeTriggerFunction"
+                - "Arn"
+          Id: "StateChangeTriggerFunctionV1"
+    
+  PermissionForEventsToInvokeStateChangeLambda: 
+    Type: AWS::Lambda::Permission
+    Properties: 
+      FunctionName: 
+        Ref: "StateChangeTriggerFunction"
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn: 
+        Fn::GetAtt: 
+          - "StateChangeEventRule"
+          - "Arn"
+
+  StateChangeTriggerFunctionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: StateChangeTriggerLogsPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: "*"
+        - PolicyName: StateChangeTriggerDynamoDBPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "dynamodb:UpdateItem"
+                Resource: !GetAtt InstanceMetadataTable.Arn
+
+  StateChangeTriggerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: source/StateChangeTriggerFunction/
+      Handler: app.lambda_handler
+      Role: !GetAtt [ StateChangeTriggerFunctionRole, Arn ]
+      Runtime: python3.7
+      Environment:
+        Variables:
+          INSTANCE_METADATA_TABLE: !Ref InstanceMetadataTable
+          INSTANCE_METADATA_ITEM_RETENTION_DAYS: !Ref InstanceMetadataTableRetentionPeriodDays
+      Timeout: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionTimeout]
+      MemorySize: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionMemorySize]
+      ReservedConcurrentExecutions: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionRCE]
+  # ------------------------------------------------------
+
+  # Instance Metadata Enrichment -------------------------
+  InstanceMetadataEnrichmentFunctionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: InstanceMetadataEnrichmentLogsPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: "*"
+        - PolicyName: InstanceMetadataEnrichmentDynamoDBPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "dynamodb:ListStreams"
+                  - "dynamodb:UpdateItem"
+                Resource: !GetAtt InstanceMetadataTable.Arn
+
+        - PolicyName: InstanceMetadataEnrichmentDynamoDBStreamPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "dynamodb:DescribeStream"
+                  - "dynamodb:GetRecords"
+                  - "dynamodb:GetShardIterator"
+                Resource: !GetAtt InstanceMetadataTable.StreamArn
+        - PolicyName: InstanceMetadataEnrichmentEC2Policy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "ec2:DescribeInstances"
+                Resource: "*"
+
+  InstanceMetadataEnrichmentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: source/InstanceMetadataEnrichmentFunction/
+      Handler: app.lambda_handler
+      Role: !GetAtt [ InstanceMetadataEnrichmentFunctionRole, Arn ]
+      Runtime: python3.7
+      Environment:
+        Variables:
+          INSTANCE_METADATA_TABLE: !Ref InstanceMetadataTable
+      Events:
+        DynamoDB1:
+          Type: DynamoDB
+          Properties:
+            Stream:
+              'Fn::GetAtt':
+                - InstanceMetadataTable
+                - StreamArn
+            StartingPosition: TRIM_HORIZON
+            BatchSize: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", StreamBatchSize]
+            MaximumBatchingWindowInSeconds: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", StreamMaximumBatchingWindowInSeconds]
+            MaximumRecordAgeInSeconds: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", StreamMaximumRecordAgeInSeconds]
+            MaximumRetryAttempts: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", StreamMaximumRetryAttempts]
+      Timeout: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionTimeout]
+      MemorySize: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionMemorySize]
+      ReservedConcurrentExecutions: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionRCE]
+  
+  # ------------------------------------------------------
+
+  # DataSink Trigger Function ----------------------------
+  
+  DataSinkTriggerFunctionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: DataSinkTriggerLogsPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: "*"
+        - PolicyName: DataSinkTriggerDynamoDBPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "dynamodb:ListStreams"
+                Resource: !GetAtt InstanceMetadataTable.Arn
+        - PolicyName: DataSinkTriggerDynamoDBStreamPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "dynamodb:DescribeStream"
+                  - "dynamodb:GetRecords"
+                  - "dynamodb:GetShardIterator"
+                Resource: !GetAtt InstanceMetadataTable.StreamArn
+        - PolicyName: DataSinkTriggerStateMachinePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "states:StartExecution"
+                Resource: !Ref DataSinkStateMachine
+
+  DataSinkTriggerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: source/DataSinkTriggerFunction/
+      Handler: app.lambda_handler
+      Role: !GetAtt [ DataSinkTriggerFunctionRole, Arn ]
+      Runtime: python3.7
+      Environment:
+        Variables:
+          DATA_SINK_STATE_MACHINE_ARN: !Ref DataSinkStateMachine
+      Events:
+        DynamoDB1:
+          Type: DynamoDB
+          Properties:
+            Stream:
+              'Fn::GetAtt':
+                - InstanceMetadataTable
+                - StreamArn
+            StartingPosition: TRIM_HORIZON
+            BatchSize: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", StreamBatchSize]
+            MaximumBatchingWindowInSeconds: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", StreamMaximumBatchingWindowInSeconds]
+            MaximumRecordAgeInSeconds: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", StreamMaximumRecordAgeInSeconds]
+            MaximumRetryAttempts: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", StreamMaximumRetryAttempts]
+      Timeout: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionTimeout]
+      MemorySize: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionMemorySize]
+      ReservedConcurrentExecutions: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionRCE]
+  
+  # ------------------------------------------------------
+
+  # Data Sink State Machine ------------------------------
+
+  DataSinkStateMachineRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                  - !Sub states.${AWS::Region}.amazonaws.com
+            Action: "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        - PolicyName: StatesExecutionPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "lambda:InvokeFunction"
+                Resource: "*"
+
+  DataSinkStateMachine:
+    Type: "AWS::StepFunctions::StateMachine"
+    Properties:
+      DefinitionString:
+        !Sub
+          - |-
+            {
+              "Comment": "A state machine that processes instance terminations and interruptions.",
+              "StartAt": "LastEventType",
+              "States": { 
+                "LastEventType": {
+                  "Type": "Choice",
+                  "Choices": [
+                    {
+                      "Variable": "$.instance.LastEventType",
+                      "StringEquals": "state-change",
+                      "Next": "InstanceState"
+                    },
+                    {
+                      "Variable": "$.instance.LastEventType",
+                      "StringEquals": "spot-interruption",
+                      "Next": "DataSinkInterruptionEnrichment"
+                    }
+                  ],
+                  "Default": "EventTypeSkipped"
+                }, 
+                "InstanceState": {
+                  "Type": "Choice",
+                  "Choices": [
+                    {
+                      "Variable": "$.instance.State",
+                      "StringEquals": "terminated",
+                      "Next": "DataSinkTerminationEnrichment"
+                    },
+                    {
+                      "Variable": "$.instance.State",
+                      "StringEquals": "running",
+                      "Next": "SinkNotNeeded"
+                    }
+                  ],
+                  "Default": "SinkNotNeeded"
+                },
+                "DataSinkInterruptionEnrichment": {
+                  "Type": "Task",
+                  "Resource": "${DataSinkInterruptionEnrichmentFunctionArn}",
+                  "Next": "DataSinkInterruption"
+                }, 
+                "DataSinkInterruption": {
+                  "Type": "Task",
+                  "Resource": "${DataSinkInterruptionFunctionArn}",
+                  "ResultPath": "$.result",
+                  "End": true
+                },
+                "DataSinkTerminationEnrichment": {
+                  "Type": "Task",
+                  "Resource": "${DataSinkTerminationEnrichmentFunctionArn}",
+                  "Next": "DataSinkTermination"
+                },
+                "DataSinkTermination": {
+                  "Type": "Task",
+                  "Resource": "${DataSinkTerminationFunctionArn}",
+                  "ResultPath": "$.result",
+                  "End": true
+                },
+                "EventTypeSkipped": {
+                  "Type": "Succeed"
+                },
+                "SinkNotNeeded": {
+                  "Type": "Succeed"
+                }                  
+              }
+            }
+          - { 
+              DataSinkInterruptionEnrichmentFunctionArn: !GetAtt [ DataSinkInterruptionEnrichmentFunction, Arn ],
+              DataSinkInterruptionFunctionArn: !GetAtt [ DataSinkInterruptionFunction, Arn ],
+              DataSinkTerminationEnrichmentFunctionArn: !GetAtt [ DataSinkTerminationEnrichmentFunction, Arn ],
+              DataSinkTerminationFunctionArn: !GetAtt [ DataSinkTerminationFunction, Arn ],
+            }
+      RoleArn: !GetAtt [ DataSinkStateMachineRole, Arn ]
+
+  # ------------------------------------------------------
+
+  # Data Sink State Machine Functions --------------------
+
+  DataSinkInterruptionEnrichmentFunctionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: DataSinkInterruptionErichmentLogsPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: "*"
+
+  DataSinkInterruptionEnrichmentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: source/DataSinkStateMachine/DataSinkInterruptionEnrichmentFunction
+      Handler: app.lambda_handler
+      Role: !GetAtt [ DataSinkInterruptionEnrichmentFunctionRole, Arn ]
+      Runtime: python3.7
+      Timeout: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionTimeout]
+      MemorySize: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionMemorySize]
+      ReservedConcurrentExecutions: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionRCE] 
+
+  DataSinkTerminationEnrichmentFunctionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: DataSinkTerminationEnrichmentLogsPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: "*"
+    
+  DataSinkTerminationEnrichmentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: source/DataSinkStateMachine/DataSinkTerminationEnrichmentFunction
+      Handler: app.lambda_handler
+      Role: !GetAtt [ DataSinkTerminationEnrichmentFunctionRole, Arn ]
+      Runtime: python3.7
+      Timeout: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionTimeout]
+      MemorySize: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionMemorySize]
+      ReservedConcurrentExecutions: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionRCE]
+    
+  DataSinkInterruptionFunctionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: DataSinkInterruptionLogsPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: "*"
+        - PolicyName: DataSinkInterruptionCloudwatchPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "cloudwatch:PutMetricData"
+                Resource: "*"
+
+  DataSinkInterruptionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: source/DataSinkStateMachine/DataSinkInterruptionFunction
+      Handler: app.lambda_handler
+      Role: !GetAtt [ DataSinkInterruptionFunctionRole, Arn ]
+      Runtime: python3.7
+      Timeout: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionTimeout]
+      MemorySize: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionMemorySize]
+      ReservedConcurrentExecutions: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionRCE]
+  
+  DataSinkTerminationFunctionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: DataSinkTerminationLogsPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: "*"
+        - PolicyName: DataSinkTerminationFirehosePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "firehose:PutRecord"
+                  - "firehose:PutRecordBatch"
+                Resource: !GetAtt InstanceMetadataDeliveryStream.Arn
+
+  DataSinkTerminationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: source/DataSinkStateMachine/DataSinkTerminationFunction
+      Handler: app.lambda_handler
+      Role: !GetAtt [ DataSinkTerminationFunctionRole, Arn ]
+      Runtime: python3.7
+      Environment:
+        Variables:
+          INSTANCE_METADATA_STREAM: !Ref InstanceMetadataDeliveryStream
+      Events:
+      Timeout: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionTimeout]
+      MemorySize: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionMemorySize]
+      ReservedConcurrentExecutions: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionRCE]
+
+  # ------------------------------------------------------
+
+  # CloudWatch Dashboard----------------------------------
+  
+  SpotInterruptionDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties: 
+      DashboardBody: 
+        !Sub 
+          - |-     
+            {
+              "widgets": [   
+                { 
+                    "type":"metric",
+                    "width":24,
+                    "height":6,
+                    "properties":{
+                      "metrics":[
+                        [ { "expression": "SEARCH('{EC2SpotInterruptions,AvailabilityZone} MetricName=\"Interruptions\"', 'Sum', 300)", "id": "e1" } ]
+                      ],
+                      "period":300,
+                      "stat":"Sum",
+                      "view":"singleValue",
+                      "region":"${DeployedRegion}",
+                      "title":"Spot Interruptions - By Availability Zone"
+                    }
+                },
+                { 
+                    "type":"metric",
+                    "width":24,
+                    "height":6,
+                    "properties":{ 
+                      "metrics":[
+                        [ { "expression": "SEARCH('{EC2SpotInterruptions,InstanceType} MetricName=\"Interruptions\"', 'Sum', 300)", "id": "e1" } ]
+                      ],
+                      "period":300,
+                      "stat":"Sum",
+                      "view":"singleValue",
+                      "region":"${DeployedRegion}",
+                      "title":"Spot Interruptions - By Instance Type"
+                    }
+                }                                               
+              ]
+            }
+          - { 
+              DeployedRegion: !Ref "AWS::Region",
+            }
+                        
+  # ------------------------------------------------------
+  
+  # Glue Resources ---------------------------------------
+
+  InstanceMetadataGlueDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+        CatalogId: !Ref AWS::AccountId
+        DatabaseInput:
+            Description: "Database for Instance Metadata"
+            
+  InstanceMetadataGlueTable:
+    DependsOn: InstanceMetadataGlueDatabase
+    Type: AWS::Glue::Table
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseName: !Ref InstanceMetadataGlueDatabase
+      TableInput:
+        Name: instances
+        Description: Instance Metadata
+        TableType: EXTERNAL_TABLE
+        Parameters:
+            classification: json
+        StorageDescriptor:
+          OutputFormat: org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat
+          Columns:
+            - Name: launchedtime
+              Type: timestamp
+            - Name: instanceid
+              Type: string
+            - Name: instancemetadataenriched
+              Type: boolean
+            - Name: availabilityzone
+              Type: string
+            - Name: interruptiontime
+              Type: timestamp
+            - Name: expirationtime
+              Type: int
+            - Name: interrupted
+              Type: boolean
+            - Name: terminatedtime
+              Type: timestamp
+            - Name: spotinstancerequestid
+              Type: string
+            - Name: lasteventtype
+              Type: string
+            - Name: instancelifecycle
+              Type: string
+            - Name: interruptedinstanceaction
+              Type: string
+            - Name: state
+              Type: string
+            - Name: region
+              Type: string
+            - Name: lasteventtime
+              Type: timestamp
+            - Name: instancetype
+              Type: string
+            - Name: tags
+              Type: array<struct<Key:string,Value:string>>
+          InputFormat: org.apache.hadoop.mapred.TextInputFormat
+          Location: !Join ['', ["s3://", !Ref InstanceMetadataBucket, "/instances"]]
+          SerdeInfo:
+            SerializationLibrary: org.openx.data.jsonserde.JsonSerDe
+
+  # ------------------------------------------------------
+
+  # Sample Athena Queries --------------------------------
+
+  QueryCountByInstanceTypesPastDay:
+    Type: AWS::Athena::NamedQuery
+    Properties:
+      Database: !Ref InstanceMetadataGlueDatabase
+      Description: "A query that shows count of interruptions over last 24 hours by instance type."
+      Name: "SpotInterruptionCountByInstanceTypesPastDay"
+      QueryString: 
+                  !Sub 
+                    - |- 
+                      SELECT 
+                        region,
+                        availabilityzone,
+                        instancetype,
+                        count(*) AS "count", 
+                        instancelifecycle,
+                        round(avg(date_diff('minute', launchedtime,terminatedtime))) as avg_min_launch_term, 
+                        round(avg(date_diff('minute', launchedtime,interruptiontime))) as avg_min_launch_interruption,
+                        round(avg(date_diff('minute', interruptiontime,terminatedtime))) as avg_min_interruption_term
+                      FROM "instancemetadatagluedatabas-umzfootzbbra"."instances"
+                      WHERE interrupted = true AND date_diff('hour', interruptiontime, current_timestamp) < 24
+                      GROUP BY region, availabilityzone, instancetype, instancelifecycle
+                    - { 
+                        Database: !Ref InstanceMetadataGlueDatabase,
+                        Table: !Ref InstanceMetadataGlueTable
+                      }
+  
+  QueryCountByAutoScalingGroupPastDay:
+    Type: AWS::Athena::NamedQuery
+    Properties:
+      Database: !Ref InstanceMetadataGlueDatabase
+      Description: "A query that shows count of interruptions over last 24 hours by AutoScaling Group."
+      Name: "SpotInterruptionCountByAutoScalingGroupPastDay"
+      QueryString: 
+                  !Sub 
+                    - |- 
+                      SELECT
+                        tag.key,
+                        tag.value,
+                        count(*)
+                      FROM "${Database}"."${Table}"
+                      CROSS JOIN UNNEST(tags) AS t(tag)
+                      WHERE tag.key = 'aws:autoscaling:groupName' AND interrupted = true AND date_diff('hour', interruptiontime, current_timestamp) < 24
+                      GROUP BY tag.key, tag.value                    
+                    - { 
+                        Database: !Ref InstanceMetadataGlueDatabase,
+                        Table: !Ref InstanceMetadataGlueTable
+                      }
+                    
+  # ------------------------------------------------------
+
+Outputs:
+  InstanceMetadataBucket:
+    Description: "Instance Metadata Bucket"
+    Value: 
+      !Sub 
+        - |- 
+          https://s3.console.aws.amazon.com/s3/buckets/${Bucket}/?region=${Region}&tab=overview
+        - { 
+            Region: !Ref "AWS::Region", 
+            Bucket: !Ref InstanceMetadataBucket
+          }
+
+  SpotInterruptionDashboard:
+    Description: "CloudWatch Dashboard for Spot Interruptions"
+    Value: 
+          !Sub 
+            - |- 
+                https://${Region}.console.aws.amazon.com/cloudwatch/home?region=${Region}#dashboards:name=${Dashboard}
+            - { 
+                Region: !Ref "AWS::Region", 
+                Dashboard: !Ref SpotInterruptionDashboard
+              }
+
+  SampleAthenaQueryCountByInstanceTypesPastDay:
+    Description: "Sample Query for Interruptions Count By Instance Types for the Past Day"
+    Value: 
+          !Sub 
+            - |- 
+                https://${Region}.console.aws.amazon.com/athena/home?force&region=${Region}#query/saved/${Query}            
+            - { 
+                Region: !Ref "AWS::Region", 
+                Query: !Ref QueryCountByInstanceTypesPastDay
+              }
+  
+  SampleAthenaQueryCountByAutoScalingGroupPastDay:
+    Description: "Sample Query for Interruptions Count By AutoScaling Group for the Past Day"
+    Value: 
+          !Sub 
+            - |- 
+                https://${Region}.console.aws.amazon.com/athena/home?force&region=${Region}#query/saved/${Query}            
+            - { 
+                Region: !Ref "AWS::Region", 
+                Query: !Ref QueryCountByAutoScalingGroupPastDay
+              }
