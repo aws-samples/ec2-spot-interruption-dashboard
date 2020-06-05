@@ -974,7 +974,7 @@ Resources:
                         round(avg(date_diff('minute', launchedtime,terminatedtime))) as avg_min_launch_term, 
                         round(avg(date_diff('minute', launchedtime,interruptiontime))) as avg_min_launch_interruption,
                         round(avg(date_diff('minute', interruptiontime,terminatedtime))) as avg_min_interruption_term
-                      FROM "instancemetadatagluedatabas-umzfootzbbra"."instances"
+                      FROM "${Database}"."${Table}"
                       WHERE interrupted = true AND date_diff('hour', interruptiontime, current_timestamp) < 24
                       GROUP BY region, availabilityzone, instancetype, instancelifecycle
                     - { 
