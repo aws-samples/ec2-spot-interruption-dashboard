@@ -16,8 +16,12 @@
 import boto3
 import os
 import json
+import logging
 
 from botocore.exceptions import ClientError
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 from aws_embedded_metrics import metric_scope
 from aws_embedded_metrics.config import get_config
@@ -47,7 +51,9 @@ def put_instance_metric(instance, metrics):
             metrics.set_property(tag['Key'], tag['Value'])
 
     except ClientError as e:
-            print("ERROR: {}".format(e))
+        message = 'Error sending CloudWatch Metric: {}'.format(e)
+        logger.info(message)
+        raise Exception(message)
     
     return
 
@@ -69,14 +75,20 @@ def put_availabilityzone_metric(instance, metrics):
             metrics.set_property(tag['Key'], tag['Value'])
 
     except ClientError as e:
-            print("ERROR: {}".format(e))
+        message = 'Error sending CloudWatch Metric: {}'.format(e)
+        logger.info(message)
+        raise Exception(message)
 
     return
 
 def lambda_handler(event, context):
 
+    logger.info(event)
+
     instance = event['instance']
     put_instance_metric(instance)
     put_availabilityzone_metric(instance)
 
+    # End
+    logger.info('Execution Complete')
     return

@@ -16,8 +16,12 @@
 import boto3
 import os
 import json
+import logging
 
 from botocore.exceptions import ClientError
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 instance_metadata_table = boto3.resource('dynamodb').Table(os.environ['INSTANCE_METADATA_TABLE'])
 
@@ -25,17 +29,24 @@ ec2 = boto3.client('ec2')
 
 def paginate(method, **kwargs):
     client = method.__self__
-    paginator = client.get_paginator(method.__name__)
-    for page in paginator.paginate(**kwargs).result_key_iters():
-        for item in page:
-            yield item
+
+    try:
+        paginator = client.get_paginator(method.__name__)
+        for page in paginator.paginate(**kwargs).result_key_iters():
+            for item in page:
+                yield item
+
+    except ClientError as e:
+        message = 'Error describing instances: {}'.format(e)
+        logger.info(message)
+        raise Exception(message)
 
 def describe_instances(instance_ids):
     described_instances = []
 
     response = paginate(ec2.describe_instances, InstanceIds=instance_ids)
 
-    print(response)
+    logger.info(response)
 
     for item in response:
         for instance in item['Instances']:
@@ -45,7 +56,7 @@ def describe_instances(instance_ids):
 
 def lambda_handler(event, context):
 
-    print(event)
+    logger.info(event)
 
     instance_ids = []
     described_instances = []
@@ -56,17 +67,17 @@ def lambda_handler(event, context):
             item = record['dynamodb']['NewImage']
             instance_id = item['InstanceId']['S']
             instance_ids.append(instance_id)
-            print(item)
+            logger.info(item)
 
     # Describe Instances
     if len(instance_ids) > 0:
         described_instances = describe_instances(instance_ids)
-        print(described_instances)
+        logger.info(described_instances)
 
     # Update Instance Records With Metadata
 
     for instance in described_instances:
-        print(instance)
+        logger.info(instance)
         try:
 
             item = {
@@ -105,10 +116,12 @@ def lambda_handler(event, context):
                 ReturnValues="NONE"
             )
 
-            print(response)
+            logger.info(response)
         except ClientError as e:
-            print(e)
-
+            message = 'Error updating instances in DynamoDB: {}'.format(e)
+            logger.info(message)
+            raise Exception(message)
+            
     # End
-    print('Execution Complete')
+    logger.info('Execution Complete')
     return

@@ -19,7 +19,8 @@ Transform: AWS::Serverless-2016-10-31
 Description: >
   ec2-spot-interruption-dashboard
 
-  Sample solution for logging instance details in response to EC2 Spot Instance Interruption Warnings
+  Sample solution for logging instance details in response to EC2 Spot Instance Interruption Warnings, displaying
+  them in CloudWatch, and querying them in Athena.
   
 Parameters:
 

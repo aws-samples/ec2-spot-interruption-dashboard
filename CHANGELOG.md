@@ -8,7 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Support for capturing Rebalance Recommendation Events
 - Sample Athena Query for Rebalance Recommendation Events
-- Single-Click Deployment
+- Updated logging to use Logging library
+- Additional boto3 client exception handling
+- Published to Serverless Application Repo
+- Deployment button added to readme
 
 ## [1.0.0] - 2020-05-14
 ### Added

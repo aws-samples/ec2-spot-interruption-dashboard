@@ -16,24 +16,29 @@
 import boto3
 import os
 import json
+import logging
 
 from botocore.exceptions import ClientError
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 def enrich_instance_metadata(instance):
 
     # Extend this function to enrich Instance Metadata
 
+    logger.info(instance)
     return instance
 
 def lambda_handler(event, context):
 
-    print(event)
+    logger.info(event)
 
     instance = event['instance']
     enriched_instance = enrich_instance_metadata(instance)
 
     # End
-    print('Execution Complete')
+    logger.info('Execution Complete')
     return {
         'instance': enriched_instance
     }

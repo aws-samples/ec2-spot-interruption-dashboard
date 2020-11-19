@@ -16,14 +16,18 @@
 import boto3
 import os
 import json
+import logging
 
 from botocore.exceptions import ClientError
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 instance_metadata_table = boto3.resource('dynamodb').Table(os.environ['INSTANCE_METADATA_TABLE'])
 
 def lambda_handler(event, context):
 
-    print(event)
+    logger.info(event)
 
     # Transform CloudWatch Event
     item = {
@@ -35,7 +39,7 @@ def lambda_handler(event, context):
         'RebalanceRecommendationTime': event['time']
     }
 
-    print(item)
+    logger.info(item)
 
     # Commit to DynamoDB
     try:
@@ -61,10 +65,12 @@ def lambda_handler(event, context):
             ReturnValues="NONE"
         )
 
-        print(response)
+        logger.info(response)
     except ClientError as e:
-        print(e)
+        message = 'Error updating instance in DynamoDB: {}'.format(e)
+        logger.info(message)
+        raise Exception(message)
 
     # End
-    print('Execution Complete')
+    logger.info('Execution Complete')
     return
