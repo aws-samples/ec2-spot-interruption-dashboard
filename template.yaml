@@ -719,10 +719,21 @@ Resources:
                     {
                       "Variable": "$.instance.State",
                       "StringEquals": "running",
-                      "Next": "SinkNotNeeded"
+                      "Next": "DataSinkRunningEnrichment"
                     }
                   ],
                   "Default": "SinkNotNeeded"
+                },
+                "DataSinkRunningEnrichment": {
+                  "Type": "Task",
+                  "Resource": "${DataSinkRunningEnrichmentFunctionArn}",
+                  "Next": "DataSinkRunning"
+                }, 
+                "DataSinkRunning": {
+                  "Type": "Task",
+                  "Resource": "${DataSinkRunningFunctionArn}",
+                  "ResultPath": "$.result",
+                  "End": true
                 },
                 "DataSinkInterruptionEnrichment": {
                   "Type": "Task",
@@ -755,6 +766,8 @@ Resources:
               }
             }
           - { 
+              DataSinkRunningEnrichmentFunctionArn: !GetAtt [ DataSinkRunningEnrichmentFunction, Arn ],
+              DataSinkRunningFunctionArn: !GetAtt [ DataSinkRunningFunction, Arn ],
               DataSinkInterruptionEnrichmentFunctionArn: !GetAtt [ DataSinkInterruptionEnrichmentFunction, Arn ],
               DataSinkInterruptionFunctionArn: !GetAtt [ DataSinkInterruptionFunction, Arn ],
               DataSinkTerminationEnrichmentFunctionArn: !GetAtt [ DataSinkTerminationEnrichmentFunction, Arn ],
@@ -765,6 +778,39 @@ Resources:
   # ------------------------------------------------------
 
   # Data Sink State Machine Functions --------------------
+
+  DataSinkRunningEnrichmentFunctionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: DataSinkRunningErichmentLogsPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: "*"
+
+  DataSinkRunningEnrichmentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: source/DataSinkStateMachine/DataSinkRunningEnrichmentFunction
+      Handler: app.lambda_handler
+      Role: !GetAtt [ DataSinkRunningEnrichmentFunctionRole, Arn ]
+      Runtime: python3.7
+      Timeout: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionTimeout]
+      MemorySize: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionMemorySize]
+      ReservedConcurrentExecutions: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionRCE] 
 
   DataSinkInterruptionEnrichmentFunctionRole:
     Type: "AWS::IAM::Role"
@@ -831,7 +877,48 @@ Resources:
       Timeout: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionTimeout]
       MemorySize: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionMemorySize]
       ReservedConcurrentExecutions: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionRCE]
-    
+
+  DataSinkRunningFunctionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: DataSinkRunningLogsPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: "*"
+        - PolicyName: DataSinkRunningCloudwatchPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "cloudwatch:PutMetricData"
+                Resource: "*"
+
+  DataSinkRunningFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: source/DataSinkStateMachine/DataSinkRunningFunction
+      Handler: app.lambda_handler
+      Role: !GetAtt [ DataSinkRunningFunctionRole, Arn ]
+      Runtime: python3.7
+      Timeout: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionTimeout]
+      MemorySize: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionMemorySize]
+      ReservedConcurrentExecutions: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionRCE]
+
   DataSinkInterruptionFunctionRole:
     Type: "AWS::IAM::Role"
     Properties:
@@ -921,7 +1008,7 @@ Resources:
 
   # ------------------------------------------------------
 
-  # CloudWatch Dashboard----------------------------------
+  # CloudWatch Dashboards ----------------------------------
   
   SpotInterruptionDashboard:
     Type: AWS::CloudWatch::Dashboard
@@ -930,20 +1017,39 @@ Resources:
         !Sub 
           - |-     
             {
-              "widgets": [   
+              "start": "-PT3H",
+              "periodOverride": "inherit",
+              "widgets": [  
+                { 
+                    "type":"metric",
+                    "width":24,
+                    "height":3,
+                    "properties":{
+                      "metrics":[
+                        [ { "expression": "SUM(SEARCH('{EC2SpotDashboard,AvailabilityZone} MetricName=\"Launches\"', 'Sum', 300))", "id": "e1", "label": "Spot Launches" } ],
+                        [ { "expression": "SUM(SEARCH('{EC2SpotDashboard,AvailabilityZone} MetricName=\"Interruptions\"', 'Sum', 300))", "id": "e2", "label": "Spot Interruptions" } ],
+                        [ { "expression": "100*(e2/e1)", "id": "e3", "label": "Interruption Rate %" } ]
+                      ],
+                      "period":86400,
+                      "stat":"Sum",
+                      "view":"singleValue",
+                      "region":"${DeployedRegion}",
+                      "title":"Overview"
+                    }
+                },  
                 { 
                     "type":"metric",
                     "width":24,
                     "height":6,
                     "properties":{
                       "metrics":[
-                        [ { "expression": "SEARCH('{EC2SpotInterruptions,AvailabilityZone} MetricName=\"Interruptions\"', 'Sum', 300)", "id": "e1" } ]
+                        [ { "expression": "SEARCH('{EC2SpotDashboard,AvailabilityZone} MetricName=\"Interruptions\"', 'Sum', 300)", "id": "e1" } ]
                       ],
-                      "period":300,
+                      "period":86400,
                       "stat":"Sum",
                       "view":"singleValue",
                       "region":"${DeployedRegion}",
-                      "title":"Spot Interruptions - By Availability Zone"
+                      "title":"Spot Interruption Counts - By Availability Zone"
                     }
                 },
                 { 
@@ -952,13 +1058,13 @@ Resources:
                     "height":6,
                     "properties":{ 
                       "metrics":[
-                        [ { "expression": "SEARCH('{EC2SpotInterruptions,InstanceType} MetricName=\"Interruptions\"', 'Sum', 300)", "id": "e1" } ]
+                        [ { "expression": "SEARCH('{EC2SpotDashboard,InstanceType} MetricName=\"Interruptions\"', 'Sum', 300)", "id": "e1" } ]
                       ],
-                      "period":300,
+                      "period":86400,
                       "stat":"Sum",
                       "view":"singleValue",
                       "region":"${DeployedRegion}",
-                      "title":"Spot Interruptions - By Instance Type"
+                      "title":"Spot Interruption Counts - By Instance Type"
                     }
                 }                                               
               ]
@@ -966,7 +1072,7 @@ Resources:
           - { 
               DeployedRegion: !Ref "AWS::Region",
             }
-                        
+
   # ------------------------------------------------------
   
   # Glue Resources ---------------------------------------
@@ -1125,7 +1231,7 @@ Outputs:
           }
 
   SpotInterruptionDashboard:
-    Description: "CloudWatch Dashboard for Spot Interruptions"
+    Description: "CloudWatch Dashboard for Spot Interruption Information"
     Value: 
           !Sub 
             - |- 

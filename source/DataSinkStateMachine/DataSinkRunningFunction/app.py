@@ -42,7 +42,7 @@ def put_instance_metric(instance, metrics):
             { 
                 "InstanceType": instance['InstanceType']
             })
-        metrics.put_metric("Interruptions", 1, "Count")
+        metrics.put_metric("Launches", 1, "Count")
         metrics.set_property("Region", instance['Region'])
         metrics.set_property("AvailabilityZone", instance['AvailabilityZone'])
         metrics.set_property("InstanceType", instance['InstanceType'])
@@ -66,7 +66,7 @@ def put_availabilityzone_metric(instance, metrics):
             { 
                 "AvailabilityZone": instance['AvailabilityZone']
             })
-        metrics.put_metric("Interruptions", 1, "Count")
+        metrics.put_metric("Launches", 1, "Count")
         metrics.set_property("Region", instance['Region'])
         metrics.set_property("AvailabilityZone", instance['AvailabilityZone'])
         metrics.set_property("InstanceType", instance['InstanceType'])
@@ -86,8 +86,13 @@ def lambda_handler(event, context):
     logger.info(event)
 
     instance = event['instance']
-    put_instance_metric(instance)
-    put_availabilityzone_metric(instance)
+
+    if instance['InstanceLifecycle'] == "spot":
+        logger.info("Instance is a Spot Instance, sending CloudWatch Metrics")
+        put_instance_metric(instance)
+        put_availabilityzone_metric(instance)
+    else:
+        logger.info("Instance is an On-Demand Instance, skipping sending CloudWatch Metrics")
 
     # End
     logger.info('Execution Complete')
