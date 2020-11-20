@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sample Athena Query for Rebalance Recommendation Events
 - Updated logging to use Logging library
 - Additional boto3 client exception handling
+- Add EventHistory attribute to DynamoDB so you can see all a history of all events
 - Published to Serverless Application Repo
 - Deployment button added to readme
 

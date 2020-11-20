@@ -1031,6 +1031,8 @@ Resources:
               Type: string
             - Name: tags
               Type: array<struct<Key:string,Value:string>>
+            - Name: eventhistory
+              Type: array<struct<Name:string,State:string,Time:timestamp>>
           InputFormat: org.apache.hadoop.mapred.TextInputFormat
           Location: !Join ['', ["s3://", !Ref InstanceMetadataBucket, "/instances"]]
           SerdeInfo:

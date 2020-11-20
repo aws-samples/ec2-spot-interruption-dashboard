@@ -35,6 +35,7 @@ def lambda_handler(event, context):
         'Region': event['region'],
         'LastEventTime': event['time'],
         'LastEventType': 'spot-interruption',
+        'State': 'none',
         'Interrupted': True,
         'InterruptedInstanceAction': event['detail']['instance-action'],
         'InterruptionTime': event['time']
@@ -48,14 +49,15 @@ def lambda_handler(event, context):
             Key={
                 'InstanceId': item['InstanceId']
             },
-            UpdateExpression="SET #Region = :Region, #LastEventTime = :LastEventTime, #LastEventType = :LastEventType, #Interrupted = :Interrupted, #InterruptedInstanceAction = :InterruptedInstanceAction, #InterruptionTime = :InterruptionTime",
+            UpdateExpression="SET #Region = :Region, #LastEventTime = :LastEventTime, #LastEventType = :LastEventType, #Interrupted = :Interrupted, #InterruptedInstanceAction = :InterruptedInstanceAction, #InterruptionTime = :InterruptionTime, #EventHistory = list_append(if_not_exists(#EventHistory, :empty_list), :EventHistory)",
             ExpressionAttributeNames={
                 '#Region' : 'Region',
                 '#LastEventTime' : 'LastEventTime',
                 '#LastEventType' : 'LastEventType',
                 '#Interrupted' : 'Interrupted',
                 '#InterruptedInstanceAction' : 'InterruptedInstanceAction',
-                '#InterruptionTime' : 'InterruptionTime'
+                '#InterruptionTime' : 'InterruptionTime',
+                '#EventHistory' : 'EventHistory'
             },
             ExpressionAttributeValues={
                 ':Region': item['Region'],
@@ -63,7 +65,13 @@ def lambda_handler(event, context):
                 ':LastEventType': item['LastEventType'],
                 ':Interrupted': item['Interrupted'],
                 ':InterruptedInstanceAction': item['InterruptedInstanceAction'],
-                ':InterruptionTime': item['InterruptionTime']
+                ':InterruptionTime': item['InterruptionTime'],
+                ':EventHistory': [{ 
+                    "Name":  item['LastEventType'], 
+                    "Time": item['LastEventTime'],
+                    "State": item['State']
+                }],
+                ":empty_list": []
                 },
             ReturnValues="NONE"
         )

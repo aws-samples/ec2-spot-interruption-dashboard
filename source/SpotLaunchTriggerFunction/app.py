@@ -37,19 +37,10 @@ def lambda_handler(event, context):
         'Region': event['region'],
         'LastEventTime': event['time'],
         'LastEventType': 'spot-launch',
-        'State': 'pending',
+        'State': 'none',
         'SpotInstanceRequestId': event['detail']['spot-instance-request-id'],
-        'ExpirationTime': int(time.time() + item_expiration_days),
-        'EventHistory': []
+        'ExpirationTime': int(time.time() + item_expiration_days)
     }
-
-    event_history_event = {
-        'Name': item['LastEventType'],
-        'Time': item['LastEventTime'],
-        'State': item['State']
-    }
-
-    item['EventHistory'].append(event_history_event)
 
     logging.info(item)
     
@@ -59,7 +50,7 @@ def lambda_handler(event, context):
             Key={
                 'InstanceId': item['InstanceId']
                 },
-            UpdateExpression="SET #Region = :Region, #LastEventTime = :LastEventTime, #LastEventType = :LastEventType, #SpotInstanceRequestId = :SpotInstanceRequestId, #ExpirationTime = :ExpirationTime, #EventHistory = :EventHistory",
+            UpdateExpression="SET #Region = :Region, #LastEventTime = :LastEventTime, #LastEventType = :LastEventType, #SpotInstanceRequestId = :SpotInstanceRequestId, #ExpirationTime = :ExpirationTime, #EventHistory = list_append(if_not_exists(#EventHistory, :empty_list), :EventHistory)",
             ExpressionAttributeNames={
                 '#Region' : 'Region',
                 '#LastEventTime' : 'LastEventTime',
@@ -74,7 +65,12 @@ def lambda_handler(event, context):
                 ':LastEventType': item['LastEventType'],
                 ':SpotInstanceRequestId': item['SpotInstanceRequestId'],
                 ':ExpirationTime': 'ExpirationTime',
-                ':EventHistory': item['EventHistory']                  
+                ':EventHistory': [{ 
+                    "Name":  item['LastEventType'], 
+                    "Time": item['LastEventTime'],
+                    "State": item['State']
+                }],
+                ":empty_list": []                 
                 },
             ReturnValues="NONE"
         )

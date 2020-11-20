@@ -41,17 +41,8 @@ def lambda_handler(event, context):
             'LastEventType': 'state-change',
             'State': event['detail']['state'],
             'LaunchedTime': event['time'],
-            'ExpirationTime': int(time.time() + item_expiration_days),
-            'EventHistory': []
+            'ExpirationTime': int(time.time() + item_expiration_days)
         }
-
-        event_history_event = {
-            'Name': item['LastEventType'],
-            'Time': item['LastEventTime'],
-            'State': item['State']
-        }
-
-        item['EventHistory'].append(event_history_event)
 
         logger.info(item)
 
@@ -61,7 +52,7 @@ def lambda_handler(event, context):
                 Key={
                     'InstanceId': item['InstanceId']
                     },
-                UpdateExpression="SET #Region = :Region, #LastEventTime = :LastEventTime, #LastEventType = :LastEventType, #State = :State, #LaunchedTime = :LaunchedTime, #ExpirationTime = :ExpirationTime, #EventHistory = :EventHistory",
+                UpdateExpression="SET #Region = :Region, #LastEventTime = :LastEventTime, #LastEventType = :LastEventType, #State = :State, #LaunchedTime = :LaunchedTime, #ExpirationTime = :ExpirationTime, #EventHistory = list_append(if_not_exists(#EventHistory, :empty_list), :EventHistory)",
                 ExpressionAttributeNames={
                     '#Region' : 'Region',
                     '#LastEventTime' : 'LastEventTime',
@@ -78,7 +69,12 @@ def lambda_handler(event, context):
                     ':State': item['State'],
                     ':LaunchedTime': item['LaunchedTime'],
                     ':ExpirationTime': item['ExpirationTime'],
-                    ':EventHistory': item['EventHistory']
+                    ':EventHistory': [{ 
+                        "Name":  item['LastEventType'], 
+                        "Time": item['LastEventTime'],
+                        "State": item['State']
+                    }],
+                    ":empty_list": []
                     },
                 ReturnValues="NONE"
             )
@@ -98,17 +94,8 @@ def lambda_handler(event, context):
             'LastEventTime': event['time'],
             'LastEventType': 'state-change',
             'State': event['detail']['state'],
-            'TerminatedTime': event['time'],
-            'EventHistory': []
+            'TerminatedTime': event['time']
         }
-
-        event_history_event = {
-            'Name': item['LastEventType'],
-            'Time': item['LastEventTime'],
-            'State': item['State']
-        }
-
-        item['EventHistory'].append(event_history_event)
 
         # Commit to DynamoDB
         try:
@@ -116,7 +103,7 @@ def lambda_handler(event, context):
                 Key={
                     'InstanceId': item['InstanceId']
                     },
-                UpdateExpression="SET #Region = :Region, #LastEventTime = :LastEventTime, #LastEventType = :LastEventType, #State = :State, #TerminatedTime = :TerminatedTime, #EventHistory = :EventHistory",
+                UpdateExpression="SET #Region = :Region, #LastEventTime = :LastEventTime, #LastEventType = :LastEventType, #State = :State, #TerminatedTime = :TerminatedTime, #EventHistory = list_append(if_not_exists(#EventHistory, :empty_list), :EventHistory)",
                 ExpressionAttributeNames={
                     '#Region' : 'Region',
                     '#LastEventTime' : 'LastEventTime',
@@ -131,7 +118,12 @@ def lambda_handler(event, context):
                     ':LastEventType': item['LastEventType'],
                     ':State': item['State'],
                     ':TerminatedTime': item['TerminatedTime'],
-                    ':EventHistory': item['EventHistory']
+                    ':EventHistory': [{ 
+                        "Name":  item['LastEventType'], 
+                        "Time": item['LastEventTime'],
+                        "State": item['State']
+                    }],
+                    ":empty_list": []
                     },
                 ReturnValues="NONE"
             )

@@ -35,6 +35,7 @@ def lambda_handler(event, context):
         'Region': event['region'],
         'LastEventTime': event['time'],
         'LastEventType': 'rebalance-recommendation',
+        'State': 'none',
         'RebalanceRecommended': True,
         'RebalanceRecommendationTime': event['time']
     }
@@ -47,20 +48,27 @@ def lambda_handler(event, context):
             Key={
                 'InstanceId': item['InstanceId']
             },
-            UpdateExpression="SET #Region = :Region, #LastEventTime = :LastEventTime, #LastEventType = :LastEventType, #RebalanceRecommended = :RebalanceRecommended, #RebalanceRecommendationTime = :RebalanceRecommendationTime",
+            UpdateExpression="SET #Region = :Region, #LastEventTime = :LastEventTime, #LastEventType = :LastEventType, #RebalanceRecommended = :RebalanceRecommended, #RebalanceRecommendationTime = :RebalanceRecommendationTime, #EventHistory = list_append(if_not_exists(#EventHistory, :empty_list), :EventHistory)",
             ExpressionAttributeNames={
                 '#Region' : 'Region',
                 '#LastEventTime' : 'LastEventTime',
                 '#LastEventType' : 'LastEventType',
                 '#RebalanceRecommended' : 'RebalanceRecommended',
-                '#RebalanceRecommendationTime' : 'RebalanceRecommendationTime'
+                '#RebalanceRecommendationTime' : 'RebalanceRecommendationTime',
+                '#EventHistory' : 'EventHistory'
             },
             ExpressionAttributeValues={
                 ':Region': item['Region'],
                 ':LastEventTime': item['LastEventTime'],
                 ':LastEventType': item['LastEventType'],
                 ':RebalanceRecommended': item['RebalanceRecommended'],
-                ':RebalanceRecommendationTime': item['RebalanceRecommendationTime']
+                ':RebalanceRecommendationTime': item['RebalanceRecommendationTime'],
+                ':EventHistory': [{ 
+                    "Name":  item['LastEventType'], 
+                    "Time": item['LastEventTime'],
+                    "State": item['State']
+                }],
+                ":empty_list": []
                 },
             ReturnValues="NONE"
         )
