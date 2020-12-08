@@ -2,7 +2,11 @@
 
 This is a sample solution for logging EC2 Spot Instance Interruptions, storing them in CloudWatch and S3, and visualizing them with a CloudWatch Dashboard and Amazon Athena.
 
-Tracking Spot Interruptions which can be useful when done for the right reasons, such as evaluating tolerance to interruptions or conducing testing. However, frequency of interruption, or number of interruptions of a particular instance type, are examples of metrics that do not directly reflect the availability or reliability of your applications. Since Spot Interruptions can fluctuate dynamically based on overall Spot Instance availability and demand for On-Demand Instances, tracking interruptions often results in misleading conclusions. Because of this, it's recommended that this solution be used for those situations where Spot Interruptions inform a specific outcome, as they do not accurately reflect system health or availability.
+[![Launch Stack](https://cdn.rawgit.com/buildkite/cloudformation-launch-stack-button-svg/master/launch-stack.svg)](https://console.aws.amazon.com/cloudformation/home?region=us-west-2#/stacks/new?stackName=stack_name&templateURL=https://shhorsfi-sam-deploy.s3-us-west-2.amazonaws.com/ec2-spot-interruption-dashboard/packaged.yaml)
+
+Tracking Spot Interruptions can be useful when done for the right reasons, such as evaluating tolerance to interruptions or conducing testing. However, frequency of interruption, or number of interruptions of a particular instance type, are examples of metrics that do not directly reflect the availability or reliability of your applications. Since Spot Interruptions can fluctuate dynamically based on overall Spot Instance availability and demand for On-Demand Instances, tracking interruptions often results in misleading conclusions. Because of this, it's recommended that this solution be used for those situations where Spot Interruptions inform a specific outcome, as they do not accurately reflect system health or availability.
+
+We recommend reading this [blog post](https://aws.amazon.com/blogs/compute/best-practices-for-handling-ec2-spot-instance-interruptions/) for more information on Best Practices for Handling EC2 Spot Interruptions.
 
 ## Overview
 

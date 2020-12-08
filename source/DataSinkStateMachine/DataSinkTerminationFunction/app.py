@@ -16,8 +16,12 @@
 import boto3
 import os
 import json
+import logging
 
 from botocore.exceptions import ClientError
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 firehose = boto3.client('firehose')
 
@@ -25,24 +29,31 @@ instance_metadata_stream = os.environ['INSTANCE_METADATA_STREAM']
 
 def sink_instance_data_to_firehose(instance):
 
-    # Send Event to Firehose
-    response = firehose.put_record(
-        DeliveryStreamName=instance_metadata_stream,
-        Record={
-            'Data': json.dumps(instance)+"\n"
-        }
-    )
-    print(response)
+    try:
+        # Send Event to Firehose
+        response = firehose.put_record(
+            DeliveryStreamName=instance_metadata_stream,
+            Record={
+                'Data': json.dumps(instance)+"\n"
+            }
+        )
+        logger.info(response)
+        return instance
 
-    return instance
+    except ClientError as e:
+        message = 'Error sending instance data to Kinesis Firehose: {}'.format(e)
+        logger.info(message)
+        raise Exception(message)
+
+    return
 
 def lambda_handler(event, context):
 
-    print(event)
+    logger.info(event)
 
     instance = event['instance']
     sink_instance_data_to_firehose(instance)
 
     # End
-    print('Execution Complete')
+    logger.info('Execution Complete')
     return

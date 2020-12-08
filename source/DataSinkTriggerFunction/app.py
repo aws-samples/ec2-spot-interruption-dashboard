@@ -16,9 +16,13 @@
 import boto3
 import os
 import json
+import logging
 
 from botocore.exceptions import ClientError
 from dynamodb_json import json_util as dynamodb_json
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 data_sink_state_machine_arn = os.environ['DATA_SINK_STATE_MACHINE_ARN']
 
@@ -26,13 +30,12 @@ stepfunctions = boto3.client('stepfunctions')
 
 def lambda_handler(event, context):
 
-    print(event)
+    logger.info(event)
 
-    # TODO: Consider Mapping all Records as input and throttling concurrency
     for record in event['Records']:
         if record['eventName'] == 'MODIFY':
             item = record['dynamodb']['NewImage']
-            print(item)
+            logger.info(item)
 
             if "InstanceMetadataEnriched" in item:
                 if item['InstanceMetadataEnriched']['BOOL'] == True:
@@ -43,16 +46,17 @@ def lambda_handler(event, context):
                         }
                         
                         try:
-                            print('Attempting to Execute State Machine: {}'.format(data_sink_state_machine_arn))
+                            logger.info('Attempting to Execute State Machine: {}'.format(data_sink_state_machine_arn))
                             response = stepfunctions.start_execution(
                                 stateMachineArn=data_sink_state_machine_arn,
                                 input=json.dumps(execution_input)
                                 )
-                            print('Execution Response: {}'.format(response))
+                            logger.info('Execution Response: {}'.format(response))
                         except Exception as e:
                             message = 'Error executing State Machine: {}'.format(e)
+                            logger.info(message)
                             raise Exception(message)
 
     # End
-    print('Execution Complete')
+    logger.info('Execution Complete')
     return

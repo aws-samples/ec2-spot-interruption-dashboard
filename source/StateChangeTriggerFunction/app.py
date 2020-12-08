@@ -16,8 +16,12 @@
 import boto3
 import os
 import time
+import logging
 
 from botocore.exceptions import ClientError
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 instance_metadata_table = boto3.resource('dynamodb').Table(os.environ['INSTANCE_METADATA_TABLE'])
 item_retention_days = os.environ['INSTANCE_METADATA_ITEM_RETENTION_DAYS']
@@ -25,7 +29,7 @@ item_expiration_days = int(item_retention_days)*60*60*24
 
 def lambda_handler(event, context):
 
-    print(event)
+    logger.info(event)
 
     if event['detail']['state'] == "running":
 
@@ -40,7 +44,7 @@ def lambda_handler(event, context):
             'ExpirationTime': int(time.time() + item_expiration_days)
         }
 
-        print(item)
+        logger.info(item)
 
         # Commit to DynamoDB
         try:
@@ -48,14 +52,15 @@ def lambda_handler(event, context):
                 Key={
                     'InstanceId': item['InstanceId']
                     },
-                UpdateExpression="SET #Region = :Region, #LastEventTime = :LastEventTime, #LastEventType = :LastEventType, #State = :State, #LaunchedTime = :LaunchedTime, #ExpirationTime = :ExpirationTime",
+                UpdateExpression="SET #Region = :Region, #LastEventTime = :LastEventTime, #LastEventType = :LastEventType, #State = :State, #LaunchedTime = :LaunchedTime, #ExpirationTime = :ExpirationTime, #EventHistory = list_append(if_not_exists(#EventHistory, :empty_list), :EventHistory)",
                 ExpressionAttributeNames={
                     '#Region' : 'Region',
                     '#LastEventTime' : 'LastEventTime',
                     '#LastEventType' : 'LastEventType',
                     '#State' : 'State',
                     '#LaunchedTime': 'LaunchedTime',
-                    '#ExpirationTime': 'ExpirationTime'
+                    '#ExpirationTime': 'ExpirationTime',
+                    '#EventHistory' : 'EventHistory'
                 },
                 ExpressionAttributeValues={
                     ':Region': item['Region'],
@@ -63,14 +68,22 @@ def lambda_handler(event, context):
                     ':LastEventType': item['LastEventType'],
                     ':State': item['State'],
                     ':LaunchedTime': item['LaunchedTime'],
-                    ':ExpirationTime': item['ExpirationTime']
+                    ':ExpirationTime': item['ExpirationTime'],
+                    ':EventHistory': [{ 
+                        "Name":  item['LastEventType'], 
+                        "Time": item['LastEventTime'],
+                        "State": item['State']
+                    }],
+                    ":empty_list": []
                     },
                 ReturnValues="NONE"
             )
             
-            print(response)
+            logger.info(response)
         except ClientError as e:
-            print("ERROR: {}".format(e))
+            message = 'Error updating instance in DynamoDB: {}'.format(e)
+            logger.info(message)
+            raise Exception(message)
 
     if event['detail']['state'] == "terminated":
 
@@ -90,28 +103,37 @@ def lambda_handler(event, context):
                 Key={
                     'InstanceId': item['InstanceId']
                     },
-                UpdateExpression="SET #Region = :Region, #LastEventTime = :LastEventTime, #LastEventType = :LastEventType, #State = :State, #TerminatedTime = :TerminatedTime",
+                UpdateExpression="SET #Region = :Region, #LastEventTime = :LastEventTime, #LastEventType = :LastEventType, #State = :State, #TerminatedTime = :TerminatedTime, #EventHistory = list_append(if_not_exists(#EventHistory, :empty_list), :EventHistory)",
                 ExpressionAttributeNames={
                     '#Region' : 'Region',
                     '#LastEventTime' : 'LastEventTime',
                     '#LastEventType' : 'LastEventType',
                     '#State' : 'State',
-                    '#TerminatedTime': 'TerminatedTime'
+                    '#TerminatedTime': 'TerminatedTime',
+                    '#EventHistory' : 'EventHistory'
                 },
                 ExpressionAttributeValues={
                     ':Region': item['Region'],
                     ':LastEventTime': item['LastEventTime'],
                     ':LastEventType': item['LastEventType'],
                     ':State': item['State'],
-                    ':TerminatedTime': item['TerminatedTime']
+                    ':TerminatedTime': item['TerminatedTime'],
+                    ':EventHistory': [{ 
+                        "Name":  item['LastEventType'], 
+                        "Time": item['LastEventTime'],
+                        "State": item['State']
+                    }],
+                    ":empty_list": []
                     },
                 ReturnValues="NONE"
             )
             
-            print(response)
+            logger.info(response)
         except ClientError as e:
-            print("ERROR: {}".format(e))
+            message = 'Error updating instance in DynamoDB: {}'.format(e)
+            logger.info(message)
+            raise Exception(message)
 
     # End
-    print('Execution Complete')
+    logger.info('Execution Complete')
     return

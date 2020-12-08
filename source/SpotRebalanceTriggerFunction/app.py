@@ -15,7 +15,7 @@
 
 import boto3
 import os
-import time
+import json
 import logging
 
 from botocore.exceptions import ClientError
@@ -24,58 +24,56 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 instance_metadata_table = boto3.resource('dynamodb').Table(os.environ['INSTANCE_METADATA_TABLE'])
-item_retention_days = os.environ['INSTANCE_METADATA_ITEM_RETENTION_DAYS']
-item_expiration_days = int(item_retention_days)*60*60*24
 
 def lambda_handler(event, context):
 
-    logging.info(event)
+    logger.info(event)
 
     # Transform CloudWatch Event
     item = {
         'InstanceId': event['detail']['instance-id'],
         'Region': event['region'],
         'LastEventTime': event['time'],
-        'LastEventType': 'spot-launch',
+        'LastEventType': 'rebalance-recommendation',
         'State': 'none',
-        'SpotInstanceRequestId': event['detail']['spot-instance-request-id'],
-        'ExpirationTime': int(time.time() + item_expiration_days)
+        'RebalanceRecommended': True,
+        'RebalanceRecommendationTime': event['time']
     }
 
-    logging.info(item)
-    
+    logger.info(item)
+
     # Commit to DynamoDB
     try:
         response=instance_metadata_table.update_item(
             Key={
                 'InstanceId': item['InstanceId']
-                },
-            UpdateExpression="SET #Region = :Region, #LastEventTime = :LastEventTime, #LastEventType = :LastEventType, #SpotInstanceRequestId = :SpotInstanceRequestId, #ExpirationTime = :ExpirationTime, #EventHistory = list_append(if_not_exists(#EventHistory, :empty_list), :EventHistory)",
+            },
+            UpdateExpression="SET #Region = :Region, #LastEventTime = :LastEventTime, #LastEventType = :LastEventType, #RebalanceRecommended = :RebalanceRecommended, #RebalanceRecommendationTime = :RebalanceRecommendationTime, #EventHistory = list_append(if_not_exists(#EventHistory, :empty_list), :EventHistory)",
             ExpressionAttributeNames={
                 '#Region' : 'Region',
                 '#LastEventTime' : 'LastEventTime',
                 '#LastEventType' : 'LastEventType',
-                '#SpotInstanceRequestId' : 'SpotInstanceRequestId',
-                '#ExpirationTime' : 'ExpirationTime',
+                '#RebalanceRecommended' : 'RebalanceRecommended',
+                '#RebalanceRecommendationTime' : 'RebalanceRecommendationTime',
                 '#EventHistory' : 'EventHistory'
-            },            
+            },
             ExpressionAttributeValues={
                 ':Region': item['Region'],
                 ':LastEventTime': item['LastEventTime'],
                 ':LastEventType': item['LastEventType'],
-                ':SpotInstanceRequestId': item['SpotInstanceRequestId'],
-                ':ExpirationTime': 'ExpirationTime',
+                ':RebalanceRecommended': item['RebalanceRecommended'],
+                ':RebalanceRecommendationTime': item['RebalanceRecommendationTime'],
                 ':EventHistory': [{ 
                     "Name":  item['LastEventType'], 
                     "Time": item['LastEventTime'],
                     "State": item['State']
                 }],
-                ":empty_list": []                 
+                ":empty_list": []
                 },
             ReturnValues="NONE"
         )
 
-        logging.info(response)
+        logger.info(response)
     except ClientError as e:
         message = 'Error updating instance in DynamoDB: {}'.format(e)
         logger.info(message)

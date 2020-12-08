@@ -19,7 +19,8 @@ Transform: AWS::Serverless-2016-10-31
 Description: >
   ec2-spot-interruption-dashboard
 
-  Sample solution for logging instance details in response to EC2 Spot Instance Interruption Warnings
+  Sample solution for logging instance details in response to EC2 Spot Instance Interruption Warnings, displaying
+  them in CloudWatch, and querying them in Athena.
   
 Parameters:
 
@@ -35,13 +36,13 @@ Parameters:
 
   EnvironmentSize: 
     Type: String
-    Default: small
+    Description: Environment Size - small (<1000 instances), medium (1000-5000 instances), large (5000-10000 instances), extralarge (>10000 instances)
+    Default: medium
     AllowedValues: 
       - small
       - medium
       - large
       - extralarge
-    Description: Environment Size - small (<1000 instances), medium (1000-5000 instances), large (5000-10000 instances), extralarge (>10000 instances)
 
 Mappings: 
   EnvironmentSizeMap: 
@@ -179,6 +180,85 @@ Resources:
           Status: Enabled
           ExpirationInDays: !Ref InstanceMetadataBucketRetentionPeriodDays
 
+  # ------------------------------------------------------
+
+
+
+  # Rebalance Recommendation ------------------------------------
+
+  SpotRebalanceEventRule: 
+    Type: AWS::Events::Rule
+    Properties: 
+      Description: "EventRule"
+      EventPattern: 
+        source: 
+            - "aws.ec2"
+        detail-type: 
+            - "EC2 Instance Rebalance Recommendation"
+      State: "ENABLED"
+      Targets: 
+        - 
+          Arn: 
+            Fn::GetAtt: 
+                - "SpotRebalanceTriggerFunction"
+                - "Arn"
+          Id: "SpotRebalanceTriggerFunctionV1"
+    
+  PermissionForEventsToInvokeSpotRebalanceLambda: 
+    Type: AWS::Lambda::Permission
+    Properties: 
+      FunctionName: 
+        Ref: "SpotRebalanceTriggerFunction"
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn: 
+        Fn::GetAtt: 
+          - "SpotRebalanceEventRule"
+          - "Arn"
+
+  SpotRebalanceTriggerFunctionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: SpotRebalanceTriggerLogsPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: "*"
+        - PolicyName: SpotRebalanceTriggerDynamoDBPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "dynamodb:UpdateItem"
+                Resource: !GetAtt InstanceMetadataTable.Arn
+
+  SpotRebalanceTriggerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: source/SpotRebalanceTriggerFunction/
+      Handler: app.lambda_handler
+      Role: !GetAtt [ SpotRebalanceTriggerFunctionRole, Arn ]
+      Runtime: python3.7
+      Environment:
+        Variables:
+          INSTANCE_METADATA_TABLE: !Ref InstanceMetadataTable
+      Timeout: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionTimeout]
+      MemorySize: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionMemorySize]
+      ReservedConcurrentExecutions: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionRCE]
   # ------------------------------------------------------
 
   # Spot Interruption ------------------------------------
@@ -639,10 +719,21 @@ Resources:
                     {
                       "Variable": "$.instance.State",
                       "StringEquals": "running",
-                      "Next": "SinkNotNeeded"
+                      "Next": "DataSinkRunningEnrichment"
                     }
                   ],
                   "Default": "SinkNotNeeded"
+                },
+                "DataSinkRunningEnrichment": {
+                  "Type": "Task",
+                  "Resource": "${DataSinkRunningEnrichmentFunctionArn}",
+                  "Next": "DataSinkRunning"
+                }, 
+                "DataSinkRunning": {
+                  "Type": "Task",
+                  "Resource": "${DataSinkRunningFunctionArn}",
+                  "ResultPath": "$.result",
+                  "End": true
                 },
                 "DataSinkInterruptionEnrichment": {
                   "Type": "Task",
@@ -675,6 +766,8 @@ Resources:
               }
             }
           - { 
+              DataSinkRunningEnrichmentFunctionArn: !GetAtt [ DataSinkRunningEnrichmentFunction, Arn ],
+              DataSinkRunningFunctionArn: !GetAtt [ DataSinkRunningFunction, Arn ],
               DataSinkInterruptionEnrichmentFunctionArn: !GetAtt [ DataSinkInterruptionEnrichmentFunction, Arn ],
               DataSinkInterruptionFunctionArn: !GetAtt [ DataSinkInterruptionFunction, Arn ],
               DataSinkTerminationEnrichmentFunctionArn: !GetAtt [ DataSinkTerminationEnrichmentFunction, Arn ],
@@ -685,6 +778,39 @@ Resources:
   # ------------------------------------------------------
 
   # Data Sink State Machine Functions --------------------
+
+  DataSinkRunningEnrichmentFunctionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: DataSinkRunningErichmentLogsPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: "*"
+
+  DataSinkRunningEnrichmentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: source/DataSinkStateMachine/DataSinkRunningEnrichmentFunction
+      Handler: app.lambda_handler
+      Role: !GetAtt [ DataSinkRunningEnrichmentFunctionRole, Arn ]
+      Runtime: python3.7
+      Timeout: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionTimeout]
+      MemorySize: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionMemorySize]
+      ReservedConcurrentExecutions: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionRCE] 
 
   DataSinkInterruptionEnrichmentFunctionRole:
     Type: "AWS::IAM::Role"
@@ -751,7 +877,48 @@ Resources:
       Timeout: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionTimeout]
       MemorySize: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionMemorySize]
       ReservedConcurrentExecutions: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionRCE]
-    
+
+  DataSinkRunningFunctionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: DataSinkRunningLogsPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: "*"
+        - PolicyName: DataSinkRunningCloudwatchPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "cloudwatch:PutMetricData"
+                Resource: "*"
+
+  DataSinkRunningFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: source/DataSinkStateMachine/DataSinkRunningFunction
+      Handler: app.lambda_handler
+      Role: !GetAtt [ DataSinkRunningFunctionRole, Arn ]
+      Runtime: python3.7
+      Timeout: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionTimeout]
+      MemorySize: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionMemorySize]
+      ReservedConcurrentExecutions: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionRCE]
+
   DataSinkInterruptionFunctionRole:
     Type: "AWS::IAM::Role"
     Properties:
@@ -841,7 +1008,7 @@ Resources:
 
   # ------------------------------------------------------
 
-  # CloudWatch Dashboard----------------------------------
+  # CloudWatch Dashboards ----------------------------------
   
   SpotInterruptionDashboard:
     Type: AWS::CloudWatch::Dashboard
@@ -850,20 +1017,39 @@ Resources:
         !Sub 
           - |-     
             {
-              "widgets": [   
+              "start": "-PT3H",
+              "periodOverride": "inherit",
+              "widgets": [  
+                { 
+                    "type":"metric",
+                    "width":24,
+                    "height":3,
+                    "properties":{
+                      "metrics":[
+                        [ { "expression": "SUM(SEARCH('{EC2SpotDashboard,AvailabilityZone} MetricName=\"Launches\"', 'Sum', 300))", "id": "e1", "label": "Spot Launches" } ],
+                        [ { "expression": "SUM(SEARCH('{EC2SpotDashboard,AvailabilityZone} MetricName=\"Interruptions\"', 'Sum', 300))", "id": "e2", "label": "Spot Interruptions" } ],
+                        [ { "expression": "100*(e2/e1)", "id": "e3", "label": "Interruption Rate %" } ]
+                      ],
+                      "period":86400,
+                      "stat":"Sum",
+                      "view":"singleValue",
+                      "region":"${DeployedRegion}",
+                      "title":"Overview"
+                    }
+                },  
                 { 
                     "type":"metric",
                     "width":24,
                     "height":6,
                     "properties":{
                       "metrics":[
-                        [ { "expression": "SEARCH('{EC2SpotInterruptions,AvailabilityZone} MetricName=\"Interruptions\"', 'Sum', 300)", "id": "e1" } ]
+                        [ { "expression": "SEARCH('{EC2SpotDashboard,AvailabilityZone} MetricName=\"Interruptions\"', 'Sum', 300)", "id": "e1" } ]
                       ],
-                      "period":300,
+                      "period":86400,
                       "stat":"Sum",
                       "view":"singleValue",
                       "region":"${DeployedRegion}",
-                      "title":"Spot Interruptions - By Availability Zone"
+                      "title":"Spot Interruption Counts - By Availability Zone"
                     }
                 },
                 { 
@@ -872,13 +1058,13 @@ Resources:
                     "height":6,
                     "properties":{ 
                       "metrics":[
-                        [ { "expression": "SEARCH('{EC2SpotInterruptions,InstanceType} MetricName=\"Interruptions\"', 'Sum', 300)", "id": "e1" } ]
+                        [ { "expression": "SEARCH('{EC2SpotDashboard,InstanceType} MetricName=\"Interruptions\"', 'Sum', 300)", "id": "e1" } ]
                       ],
-                      "period":300,
+                      "period":86400,
                       "stat":"Sum",
                       "view":"singleValue",
                       "region":"${DeployedRegion}",
-                      "title":"Spot Interruptions - By Instance Type"
+                      "title":"Spot Interruption Counts - By Instance Type"
                     }
                 }                                               
               ]
@@ -886,7 +1072,7 @@ Resources:
           - { 
               DeployedRegion: !Ref "AWS::Region",
             }
-                        
+
   # ------------------------------------------------------
   
   # Glue Resources ---------------------------------------
@@ -927,6 +1113,10 @@ Resources:
               Type: int
             - Name: interrupted
               Type: boolean
+            - Name: rebalancerecommended
+              Type: boolean
+            - Name: rebalancerecommendationtime
+              Type: timestamp
             - Name: terminatedtime
               Type: timestamp
             - Name: spotinstancerequestid
@@ -947,6 +1137,8 @@ Resources:
               Type: string
             - Name: tags
               Type: array<struct<Key:string,Value:string>>
+            - Name: eventhistory
+              Type: array<struct<Name:string,State:string,Time:timestamp>>
           InputFormat: org.apache.hadoop.mapred.TextInputFormat
           Location: !Join ['', ["s3://", !Ref InstanceMetadataBucket, "/instances"]]
           SerdeInfo:
@@ -966,14 +1158,14 @@ Resources:
                   !Sub 
                     - |- 
                       SELECT 
-                        region,
-                        availabilityzone,
-                        instancetype,
-                        count(*) AS "count", 
-                        instancelifecycle,
-                        round(avg(date_diff('minute', launchedtime,terminatedtime))) as avg_min_launch_term, 
-                        round(avg(date_diff('minute', launchedtime,interruptiontime))) as avg_min_launch_interruption,
-                        round(avg(date_diff('minute', interruptiontime,terminatedtime))) as avg_min_interruption_term
+                        region as "Region",
+                        availabilityzone as "AvailabilityZone",
+                        instancetype as "InstanceType",
+                        count(*) AS "Count", 
+                        instancelifecycle as "InstanceLifecycle",
+                        round(avg(date_diff('minute', launchedtime,terminatedtime))) as "AverageMinBetweenLaunchAndTerm", 
+                        round(avg(date_diff('minute', launchedtime,interruptiontime))) as "AverageMinBetweenLaunchandInterruption",
+                        round(avg(date_diff('minute', interruptiontime,terminatedtime))) as "AverageMinBetweenInterruptionAndTerm"
                       FROM "${Database}"."${Table}"
                       WHERE interrupted = true AND date_diff('hour', interruptiontime, current_timestamp) < 24
                       GROUP BY region, availabilityzone, instancetype, instancelifecycle
@@ -992,9 +1184,8 @@ Resources:
                   !Sub 
                     - |- 
                       SELECT
-                        tag.key,
-                        tag.value,
-                        count(*)
+                        tag.value as "AutoScalingGroup",
+                        count(*) as "InterruptedInstances"
                       FROM "${Database}"."${Table}"
                       CROSS JOIN UNNEST(tags) AS t(tag)
                       WHERE tag.key = 'aws:autoscaling:groupName' AND interrupted = true AND date_diff('hour', interruptiontime, current_timestamp) < 24
@@ -1003,7 +1194,28 @@ Resources:
                         Database: !Ref InstanceMetadataGlueDatabase,
                         Table: !Ref InstanceMetadataGlueTable
                       }
-                    
+
+  QueryRebalanceRecommendationsByAutoScalingGroupPastDay:
+    Type: AWS::Athena::NamedQuery
+    Properties:
+      Database: !Ref InstanceMetadataGlueDatabase
+      Description: "A query that shows count of rebalance recommendations over last 24 hours by AutoScaling Group."
+      Name: "QueryRebalanceRecommendationsByAutoScalingGroupPastDay"
+      QueryString: 
+                  !Sub 
+                    - |- 
+                      SELECT
+                        tag.value as "AutoScalingGroup",
+                        count(rebalancerecommended = true) as "RebalancedInstances",
+                        round(avg(date_diff('minute', rebalancerecommendationtime,terminatedtime))) as "AverageMinBetweenRebalanceAndTerm"
+                      FROM "${Database}"."${Table}"
+                      CROSS JOIN UNNEST(tags) AS t(tag)
+                      WHERE tag.key = 'aws:autoscaling:groupName' AND rebalancerecommended = true AND date_diff('hour', rebalancerecommendationtime, current_timestamp) < 24
+                      GROUP BY tag.key, tag.value                    
+                    - { 
+                        Database: !Ref InstanceMetadataGlueDatabase,
+                        Table: !Ref InstanceMetadataGlueTable
+                      }                    
   # ------------------------------------------------------
 
 Outputs:
@@ -1019,7 +1231,7 @@ Outputs:
           }
 
   SpotInterruptionDashboard:
-    Description: "CloudWatch Dashboard for Spot Interruptions"
+    Description: "CloudWatch Dashboard for Spot Interruption Information"
     Value: 
           !Sub 
             - |- 
@@ -1049,4 +1261,15 @@ Outputs:
             - { 
                 Region: !Ref "AWS::Region", 
                 Query: !Ref QueryCountByAutoScalingGroupPastDay
+              }
+
+  SampleAthenaQueryRebalanceRecommendationsByAutoScalingGroupPastDay:
+    Description: "Sample Query for Rebalance Recommendations by AutoScaling Group for the Past Day"
+    Value: 
+          !Sub 
+            - |- 
+                https://${Region}.console.aws.amazon.com/athena/home?force&region=${Region}#query/saved/${Query}            
+            - { 
+                Region: !Ref "AWS::Region", 
+                Query: !Ref QueryRebalanceRecommendationsByAutoScalingGroupPastDay
               }
