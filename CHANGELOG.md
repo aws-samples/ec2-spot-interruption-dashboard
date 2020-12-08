@@ -12,7 +12,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Additional boto3 client exception handling
 - Add EventHistory attribute to DynamoDB so you can see and report on a history of all events
 - Adds aggregate interruption rate percentage to sample dashboard
-- Published to Serverless Application Repo
 - Deployment button added to readme
 
 ## [1.0.0] - 2020-05-14

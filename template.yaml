@@ -36,13 +36,13 @@ Parameters:
 
   EnvironmentSize: 
     Type: String
-    Default: small
+    Description: Environment Size - small (<1000 instances), medium (1000-5000 instances), large (5000-10000 instances), extralarge (>10000 instances)
+    Default: medium
     AllowedValues: 
       - small
       - medium
       - large
       - extralarge
-    Description: Environment Size - small (<1000 instances), medium (1000-5000 instances), large (5000-10000 instances), extralarge (>10000 instances)
 
 Mappings: 
   EnvironmentSizeMap: 
