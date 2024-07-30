@@ -32,3 +32,6 @@ deploy.sh
 
 # Packaged Template
 packaged.yaml
+
+# Others
+.python-version

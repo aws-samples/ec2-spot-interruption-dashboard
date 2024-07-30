@@ -11,11 +11,11 @@ We recommend reading this [blog post](https://aws.amazon.com/blogs/compute/best-
 ### Architecture Diagram
 ![Alt text](docs/diagram.png?raw=true "Diagram")
 
-This solution captures 3 types of events (Spot Launches, State Changes, Spot Interruptions), and keeps the current state of EC2 instances cached in DynamoDB. When new instances are inserted into DynamoDB (Through Spot Launch or State Change Events), an Instance Metadata Enrichment function is exected to describe more details about the instance and store those details in DynamoDB. This builds an eventually consistent view of instance details, and enforces best practices such as pagination to reduce the chance of Describe API throttling.
+This solution captures 3 types of events (Spot Launches, State Changes, Spot Interruptions), and keeps the current state of EC2 instances cached in DynamoDB. When new instances are inserted into DynamoDB (Through Spot Launch or State Change Events), an Instance Metadata Enrichment function is executed to describe more details about the instance and store those details in DynamoDB. This builds an eventually consistent view of instance details, and enforces best practices such as pagination to reduce the chance of Describe API throttling.
 
 When an instance is Interrupted, a Step Function is executed that stores interruption data in CloudWatch in the form of a custom metric. This data is used to build a dashboard (the solution deploys a example dashboard, and you can extend this or create your own), showing interruption data by Instance Type and Availability Zone.
 
-When an instance is Terminated, a Step Function is executed that stores termination data in CloudWatch in the form of JSON data that can be queried with Athena (the solution deploys example Athena Queries, and you can create your own).
+When an instance is Terminated, a Step Function is executed that stores termination data in S3 in the form of JSON data that can be queried with Athena (the solution deploys example Athena Queries, and you can create your own).
 
 NOTE: This solution is regional (you need to deploy it in each region you want to cature data within), and only captures instances launched after it is deployed. 
 
@@ -82,6 +82,11 @@ Next, run the folllowing command to build the Lambda function:
 ```bash
 sam build --use-container
 ```
+Or, below for the x86_64 Lambda Runtime
+
+```bash
+sam build --parameter-overrides RuntimeArchitecture=x86_64 --use-container
+```
 
 Next, run the following command to package our Lambda function to S3:
 
@@ -103,9 +108,23 @@ sam deploy \
         InstanceMetadataBucketRetentionPeriodDays=365 \
         EnvironmentSize=small  
 ```
+Or, below for the x86_64 Lambda Runtime
+
+```bash
+sam deploy \
+    --template-file packaged.yaml \
+    --stack-name ec2-spot-interruption-dashboard \
+    --capabilities CAPABILITY_IAM \
+    --parameter-overrides \
+        InstanceMetadataTableRetentionPeriodDays=30 \
+        InstanceMetadataBucketRetentionPeriodDays=365 \
+        RuntimeArchitecture=x86_64 \
+        EnvironmentSize=small
+```
 
 ### Stack Parameters Explained
 
+* RuntimeArchitecture - Lambda Runtime Architecture, arm64 or x86_64, prioritizing Efficiency (Performance, Cost, Sustainability), with arm64 as default.
 * InstanceMetadataTableRetentionPeriodDays - Number of days to cache instance data in DynamoDB. Items will expire after this period elapses.
 * InstanceMetadataBucketRetentionPeriodDays - Number of days to retain instance data in S3. Items will expire after this period elapses.
 * EnvironmentSize -  Corresponds to default settings for various environment sizes. These are general guidelines and it's possible these values need to be adjusted for your environment.
