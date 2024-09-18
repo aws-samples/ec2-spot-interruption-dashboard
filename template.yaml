@@ -24,6 +24,14 @@ Description: >
   
 Parameters:
 
+  RuntimeArchitecture:
+    Type: String
+    Description: Choose x86_64 or arm64
+    Default: arm64
+    AllowedValues:
+      - arm64
+      - x86_64
+
   InstanceMetadataBucketRetentionPeriodDays:
     Description: Number of days to retain Instance Metadata In S3
     Default: 365
@@ -258,7 +266,9 @@ Resources:
       CodeUri: source/SpotRebalanceTriggerFunction/
       Handler: app.lambda_handler
       Role: !GetAtt [ SpotRebalanceTriggerFunctionRole, Arn ]
-      Runtime: python3.7
+      Runtime: python3.12
+      Architectures:
+        - !Ref RuntimeArchitecture
       Environment:
         Variables:
           INSTANCE_METADATA_TABLE: !Ref InstanceMetadataTable
@@ -335,7 +345,9 @@ Resources:
       CodeUri: source/SpotInterruptionTriggerFunction/
       Handler: app.lambda_handler
       Role: !GetAtt [ SpotInterruptionTriggerFunctionRole, Arn ]
-      Runtime: python3.7
+      Runtime: python3.12
+      Architectures:
+        - !Ref RuntimeArchitecture
       Environment:
         Variables:
           INSTANCE_METADATA_TABLE: !Ref InstanceMetadataTable
@@ -412,7 +424,9 @@ Resources:
       CodeUri: source/SpotLaunchTriggerFunction/
       Handler: app.lambda_handler
       Role: !GetAtt [ SpotLaunchTriggerFunctionRole, Arn ]
-      Runtime: python3.7
+      Runtime: python3.12
+      Architectures:
+        - !Ref RuntimeArchitecture
       Environment:
         Variables:
           INSTANCE_METADATA_TABLE: !Ref InstanceMetadataTable
@@ -495,7 +509,9 @@ Resources:
       CodeUri: source/StateChangeTriggerFunction/
       Handler: app.lambda_handler
       Role: !GetAtt [ StateChangeTriggerFunctionRole, Arn ]
-      Runtime: python3.7
+      Runtime: python3.12
+      Architectures:
+        - !Ref RuntimeArchitecture
       Environment:
         Variables:
           INSTANCE_METADATA_TABLE: !Ref InstanceMetadataTable
@@ -562,7 +578,9 @@ Resources:
       CodeUri: source/InstanceMetadataEnrichmentFunction/
       Handler: app.lambda_handler
       Role: !GetAtt [ InstanceMetadataEnrichmentFunctionRole, Arn ]
-      Runtime: python3.7
+      Runtime: python3.12
+      Architectures:
+        - !Ref RuntimeArchitecture
       Environment:
         Variables:
           INSTANCE_METADATA_TABLE: !Ref InstanceMetadataTable
@@ -641,7 +659,9 @@ Resources:
       CodeUri: source/DataSinkTriggerFunction/
       Handler: app.lambda_handler
       Role: !GetAtt [ DataSinkTriggerFunctionRole, Arn ]
-      Runtime: python3.7
+      Runtime: python3.12
+      Architectures:
+        - !Ref RuntimeArchitecture
       Environment:
         Variables:
           DATA_SINK_STATE_MACHINE_ARN: !Ref DataSinkStateMachine
@@ -813,7 +833,9 @@ Resources:
       CodeUri: source/DataSinkStateMachine/DataSinkRunningEnrichmentFunction
       Handler: app.lambda_handler
       Role: !GetAtt [ DataSinkRunningEnrichmentFunctionRole, Arn ]
-      Runtime: python3.7
+      Runtime: python3.12
+      Architectures:
+        - !Ref RuntimeArchitecture
       Timeout: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionTimeout]
       MemorySize: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionMemorySize]
       ReservedConcurrentExecutions: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionRCE] 
@@ -846,7 +868,9 @@ Resources:
       CodeUri: source/DataSinkStateMachine/DataSinkInterruptionEnrichmentFunction
       Handler: app.lambda_handler
       Role: !GetAtt [ DataSinkInterruptionEnrichmentFunctionRole, Arn ]
-      Runtime: python3.7
+      Runtime: python3.12
+      Architectures:
+        - !Ref RuntimeArchitecture
       Timeout: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionTimeout]
       MemorySize: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionMemorySize]
       ReservedConcurrentExecutions: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionRCE] 
@@ -879,7 +903,9 @@ Resources:
       CodeUri: source/DataSinkStateMachine/DataSinkTerminationEnrichmentFunction
       Handler: app.lambda_handler
       Role: !GetAtt [ DataSinkTerminationEnrichmentFunctionRole, Arn ]
-      Runtime: python3.7
+      Runtime: python3.12
+      Architectures:
+        - !Ref RuntimeArchitecture
       Timeout: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionTimeout]
       MemorySize: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionMemorySize]
       ReservedConcurrentExecutions: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionRCE]
@@ -920,7 +946,9 @@ Resources:
       CodeUri: source/DataSinkStateMachine/DataSinkRunningFunction
       Handler: app.lambda_handler
       Role: !GetAtt [ DataSinkRunningFunctionRole, Arn ]
-      Runtime: python3.7
+      Runtime: python3.12
+      Architectures:
+        - !Ref RuntimeArchitecture
       Timeout: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionTimeout]
       MemorySize: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionMemorySize]
       ReservedConcurrentExecutions: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionRCE]
@@ -961,7 +989,9 @@ Resources:
       CodeUri: source/DataSinkStateMachine/DataSinkInterruptionFunction
       Handler: app.lambda_handler
       Role: !GetAtt [ DataSinkInterruptionFunctionRole, Arn ]
-      Runtime: python3.7
+      Runtime: python3.12
+      Architectures:
+        - !Ref RuntimeArchitecture
       Timeout: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionTimeout]
       MemorySize: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionMemorySize]
       ReservedConcurrentExecutions: !FindInMap [EnvironmentSizeMap, !Ref "EnvironmentSize", FunctionRCE]
@@ -1003,7 +1033,9 @@ Resources:
       CodeUri: source/DataSinkStateMachine/DataSinkTerminationFunction
       Handler: app.lambda_handler
       Role: !GetAtt [ DataSinkTerminationFunctionRole, Arn ]
-      Runtime: python3.7
+      Runtime: python3.12
+      Architectures:
+        - !Ref RuntimeArchitecture
       Environment:
         Variables:
           INSTANCE_METADATA_STREAM: !Ref InstanceMetadataDeliveryStream
